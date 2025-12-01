@@ -1,30 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Icon from '@/components/ui/icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { api } from '@/lib/api';
 
 interface Pin {
-  id: string;
+  id: number;
   title: string;
   content: string;
   author: string;
-  date: Date;
+  author_id: number;
+  date: string;
   views: number;
-  comments: Comment[];
-  favorites: number;
+  comment_count: number;
 }
 
 interface Comment {
-  id: string;
+  id: number;
   author: string;
+  author_id: number;
   content: string;
-  date: Date;
+  date: string;
 }
 
 const Index = () => {
@@ -33,11 +34,13 @@ const Index = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [currentUser, setCurrentUser] = useState('');
+  const [currentUserId, setCurrentUserId] = useState<number>(0);
   
   const [activeTab, setActiveTab] = useState<'main' | 'create' | 'favorites'>('main');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'views' | 'newest' | 'oldest'>('newest');
   const [selectedPin, setSelectedPin] = useState<Pin | null>(null);
+  const [selectedPinComments, setSelectedPinComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   
   const [newPinTitle, setNewPinTitle] = useState('');
@@ -45,115 +48,116 @@ const Index = () => {
   
   const { toast } = useToast();
 
-  const [pins, setPins] = useState<Pin[]>([
-    {
-      id: '1',
-      title: 'Sample Lua Script',
-      content: `-- Lua example
-local function greet(name)
-  print("Hello, " .. name .. "!")
-end
+  const [pins, setPins] = useState<Pin[]>([]);
+  const [favoritePins, setFavoritePins] = useState<number[]>([]);
+  const [loading, setLoading] = useState(false);
 
-greet("World")`,
-      author: 'admin',
-      date: new Date('2024-12-01'),
-      views: 42,
-      comments: [
-        { id: 'c1', author: 'user1', content: 'Great script!', date: new Date() }
-      ],
-      favorites: 5
-    },
-    {
-      id: '2',
-      title: 'JavaScript Array Methods',
-      content: `// JavaScript example
-const numbers = [1, 2, 3, 4, 5];
-
-const doubled = numbers.map(n => n * 2);
-const filtered = numbers.filter(n => n > 2);
-
-console.log(doubled);
-console.log(filtered);`,
-      author: 'developer',
-      date: new Date('2024-11-30'),
-      views: 128,
-      comments: [],
-      favorites: 12
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadPins();
+      loadFavorites();
     }
-  ]);
+  }, [isAuthenticated, searchQuery, sortBy]);
 
-  const [favoritePins, setFavoritePins] = useState<string[]>([]);
+  const loadPins = async () => {
+    setLoading(true);
+    const data = await api.getPins(searchQuery, sortBy);
+    if (data.pins) {
+      setPins(data.pins);
+    }
+    setLoading(false);
+  };
 
-  const handleAuth = () => {
+  const loadFavorites = async () => {
+    if (currentUserId) {
+      const data = await api.getFavorites(currentUserId);
+      if (data.favorites) {
+        setFavoritePins(data.favorites);
+      }
+    }
+  };
+
+  const handleAuth = async () => {
     if (!username || !password) {
       toast({ title: 'Error', description: 'Please fill all fields', variant: 'destructive' });
       return;
     }
     
-    setCurrentUser(username);
-    setIsAuthenticated(true);
-    toast({ title: 'Success', description: `Welcome, ${username}!` });
+    setLoading(true);
+    const data = isLogin 
+      ? await api.login(username, password)
+      : await api.register(username, password);
+    
+    setLoading(false);
+
+    if (data.error) {
+      toast({ title: 'Error', description: data.error, variant: 'destructive' });
+      return;
+    }
+
+    if (data.user_id && data.username) {
+      setCurrentUser(data.username);
+      setCurrentUserId(data.user_id);
+      setIsAuthenticated(true);
+      toast({ title: 'Success', description: `Welcome, ${data.username}!` });
+    }
   };
 
-  const handleCreatePin = () => {
+  const handleCreatePin = async () => {
     if (!newPinTitle || !newPinContent) {
       toast({ title: 'Error', description: 'Please fill title and content', variant: 'destructive' });
       return;
     }
 
-    const newPin: Pin = {
-      id: Date.now().toString(),
-      title: newPinTitle,
-      content: newPinContent,
-      author: currentUser,
-      date: new Date(),
-      views: 0,
-      comments: [],
-      favorites: 0
-    };
+    setLoading(true);
+    const data = await api.createPin(newPinTitle, newPinContent, currentUserId);
+    setLoading(false);
 
-    setPins([newPin, ...pins]);
+    if (data.error) {
+      toast({ title: 'Error', description: data.error, variant: 'destructive' });
+      return;
+    }
+
     setNewPinTitle('');
     setNewPinContent('');
     toast({ title: 'Success', description: 'Pin created successfully!' });
+    await loadPins();
+    setActiveTab('main');
   };
 
-  const handleAddComment = () => {
+  const handleAddComment = async () => {
     if (!newComment || !selectedPin) return;
 
-    const newCommentObj: Comment = {
-      id: Date.now().toString(),
-      author: currentUser,
-      content: newComment,
-      date: new Date()
-    };
+    setLoading(true);
+    const data = await api.createComment(selectedPin.id, currentUserId, newComment);
+    setLoading(false);
 
-    setPins(pins.map(p => 
-      p.id === selectedPin.id 
-        ? { ...p, comments: [...p.comments, newCommentObj] }
-        : p
-    ));
+    if (data.error) {
+      toast({ title: 'Error', description: data.error, variant: 'destructive' });
+      return;
+    }
 
-    setSelectedPin({
-      ...selectedPin,
-      comments: [...selectedPin.comments, newCommentObj]
-    });
-
+    setSelectedPinComments([...selectedPinComments, data]);
     setNewComment('');
     toast({ title: 'Comment added!' });
   };
 
-  const handlePinClick = (pin: Pin) => {
-    setPins(pins.map(p => 
-      p.id === pin.id ? { ...p, views: p.views + 1 } : p
-    ));
+  const handlePinClick = async (pin: Pin) => {
+    await api.updatePinViews(pin.id);
     setSelectedPin({ ...pin, views: pin.views + 1 });
+    
+    const commentsData = await api.getComments(pin.id);
+    if (commentsData.comments) {
+      setSelectedPinComments(commentsData.comments);
+    }
   };
 
-  const toggleFavorite = (pinId: string) => {
+  const toggleFavorite = async (pinId: number) => {
     if (favoritePins.includes(pinId)) {
+      await api.removeFavorite(currentUserId, pinId);
       setFavoritePins(favoritePins.filter(id => id !== pinId));
     } else {
+      await api.addFavorite(currentUserId, pinId);
       setFavoritePins([...favoritePins, pinId]);
     }
   };
@@ -161,23 +165,6 @@ console.log(filtered);`,
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast({ title: 'Copied to clipboard!' });
-  };
-
-  const getSortedPins = () => {
-    const filtered = pins.filter(p => 
-      p.title.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    switch (sortBy) {
-      case 'views':
-        return filtered.sort((a, b) => b.views - a.views);
-      case 'newest':
-        return filtered.sort((a, b) => b.date.getTime() - a.date.getTime());
-      case 'oldest':
-        return filtered.sort((a, b) => a.date.getTime() - b.date.getTime());
-      default:
-        return filtered;
-    }
   };
 
   const highlightSyntax = (code: string) => {
@@ -189,6 +176,8 @@ console.log(filtered);`,
       .replace(/(\/\/.*$)/gm, '<span class="text-gray-500">$1</span>')
       .replace(/(--.*$)/gm, '<span class="text-gray-500">$1</span>');
   };
+
+  const favoritePinsList = pins.filter(p => favoritePins.includes(p.id));
 
   if (!isAuthenticated) {
     return (
@@ -218,8 +207,9 @@ console.log(filtered);`,
             <Button 
               onClick={handleAuth} 
               className="w-full gradient-button"
+              disabled={loading}
             >
-              {isLogin ? 'Login' : 'Register'}
+              {loading ? 'Loading...' : isLogin ? 'Login' : 'Register'}
             </Button>
             <Button
               variant="ghost"
@@ -272,48 +262,59 @@ console.log(filtered);`,
               </Select>
             </div>
 
-            <div className="grid gap-4">
-              {getSortedPins().map((pin) => (
-                <Card 
-                  key={pin.id} 
-                  className="p-4 cursor-pointer hover:border-primary transition-all hover-scale"
-                  onClick={() => handlePinClick(pin)}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="font-semibold text-lg">{pin.title}</h3>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFavorite(pin.id);
-                      }}
-                    >
-                      <Icon 
-                        name="Star" 
-                        size={18} 
-                        className={favoritePins.includes(pin.id) ? 'fill-yellow-500 text-yellow-500' : ''}
-                      />
-                    </Button>
-                  </div>
-                  <pre className="bg-input p-3 rounded text-sm overflow-x-auto mb-3">
-                    <code>{pin.content.slice(0, 150)}...</code>
-                  </pre>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Icon name="Eye" size={14} />
-                      {pin.views}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Icon name="MessageSquare" size={14} />
-                      {pin.comments.length}
-                    </span>
-                    <span>by {pin.author}</span>
-                    <span>{pin.date.toLocaleDateString()}</span>
-                  </div>
-                </Card>
-              ))}
-            </div>
+            {loading ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground">Loading pins...</p>
+              </div>
+            ) : pins.length === 0 ? (
+              <Card className="p-12 text-center">
+                <Icon name="FileText" size={48} className="mx-auto mb-4 text-muted-foreground" />
+                <p className="text-muted-foreground">No pins yet. Create the first one!</p>
+              </Card>
+            ) : (
+              <div className="grid gap-4">
+                {pins.map((pin) => (
+                  <Card 
+                    key={pin.id} 
+                    className="p-4 cursor-pointer hover:border-primary transition-all hover-scale"
+                    onClick={() => handlePinClick(pin)}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-semibold text-lg">{pin.title}</h3>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(pin.id);
+                        }}
+                      >
+                        <Icon 
+                          name="Star" 
+                          size={18} 
+                          className={favoritePins.includes(pin.id) ? 'fill-yellow-500 text-yellow-500' : ''}
+                        />
+                      </Button>
+                    </div>
+                    <pre className="bg-input p-3 rounded text-sm overflow-x-auto mb-3">
+                      <code>{pin.content.slice(0, 150)}...</code>
+                    </pre>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Icon name="Eye" size={14} />
+                        {pin.views}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Icon name="MessageSquare" size={14} />
+                        {pin.comment_count}
+                      </span>
+                      <span>by {pin.author}</span>
+                      <span>{new Date(pin.date).toLocaleDateString()}</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -333,9 +334,13 @@ console.log(filtered);`,
                 onChange={(e) => setNewPinContent(e.target.value)}
                 className="bg-input min-h-[400px] font-mono"
               />
-              <Button onClick={handleCreatePin} className="w-full gradient-button">
+              <Button 
+                onClick={handleCreatePin} 
+                className="w-full gradient-button"
+                disabled={loading}
+              >
                 <Icon name="Send" size={18} />
-                Publish Pin
+                {loading ? 'Publishing...' : 'Publish Pin'}
               </Button>
             </Card>
           </div>
@@ -344,14 +349,14 @@ console.log(filtered);`,
         {activeTab === 'favorites' && (
           <div className="space-y-4">
             <h2 className="text-2xl font-bold mb-4">Favorite Pins</h2>
-            {pins.filter(p => favoritePins.includes(p.id)).length === 0 ? (
+            {favoritePinsList.length === 0 ? (
               <Card className="p-12 text-center">
                 <Icon name="Star" size={48} className="mx-auto mb-4 text-muted-foreground" />
                 <p className="text-muted-foreground">No favorite pins yet</p>
               </Card>
             ) : (
               <div className="grid gap-4">
-                {pins.filter(p => favoritePins.includes(p.id)).map((pin) => (
+                {favoritePinsList.map((pin) => (
                   <Card 
                     key={pin.id} 
                     className="p-4 cursor-pointer hover:border-primary transition-all"
@@ -387,7 +392,7 @@ console.log(filtered);`,
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span>by {selectedPin.author}</span>
                 <span>•</span>
-                <span>{selectedPin.date.toLocaleDateString()}</span>
+                <span>{new Date(selectedPin.date).toLocaleDateString()}</span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
                   <Icon name="Eye" size={14} />
@@ -428,14 +433,14 @@ console.log(filtered);`,
               </div>
 
               <div className="border-t border-border pt-4">
-                <h3 className="font-semibold mb-3">Comments ({selectedPin.comments.length})</h3>
+                <h3 className="font-semibold mb-3">Comments ({selectedPinComments.length})</h3>
                 <div className="space-y-3 mb-4">
-                  {selectedPin.comments.map((comment) => (
+                  {selectedPinComments.map((comment) => (
                     <Card key={comment.id} className="p-3">
                       <div className="flex items-center justify-between mb-2">
                         <span className="font-medium text-sm">{comment.author}</span>
                         <span className="text-xs text-muted-foreground">
-                          {comment.date.toLocaleString()}
+                          {new Date(comment.date).toLocaleString()}
                         </span>
                       </div>
                       <p className="text-sm">{comment.content}</p>
@@ -449,7 +454,7 @@ console.log(filtered);`,
                     onChange={(e) => setNewComment(e.target.value)}
                     className="bg-input"
                   />
-                  <Button onClick={handleAddComment} className="gradient-button">
+                  <Button onClick={handleAddComment} className="gradient-button" disabled={loading}>
                     <Icon name="Send" size={16} />
                   </Button>
                 </div>

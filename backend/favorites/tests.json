@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "name": "Get user favorites",
+      "method": "GET",
+      "queryStringParameters": {
+        "user_id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "favorites": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}
